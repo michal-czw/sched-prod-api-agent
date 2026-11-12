@@ -34,12 +34,16 @@ export default {
         }
         incidents = incidents.filter(i => new Date(i.openedAt) > sinceDate);
       }
-      // --- existing status filter ---
+
+      // --- status filter (additive read) ---
       const status = url.searchParams.get('status');
       if (status) {
-        // Filter by status; unknown status yields empty list
+        if (status !== 'open' && status !== 'resolved') {
+          return json({ error: 'invalid status parameter' }, 400);
+        }
         incidents = incidents.filter(i => i.status === status);
       }
+
       return json({ incidents });
     }
     return json({ error: 'not found' }, 404);
