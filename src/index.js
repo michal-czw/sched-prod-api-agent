@@ -33,6 +33,20 @@ export default {
         ];
       }
       return json({ incident });
+    } else if (request.method === 'GET' && url.pathname === '/incidents/export.csv') {
+      const incidents = await feed(env);
+      const csv = incidents.map(incident => [
+        incident.id,
+        incident.service,
+        incident.summary,
+        incident.status,
+        incident.openedAt
+      ]).join('\n');
+      return new Response(csv, {
+        headers: {
+          'Content-Type': 'text/csv'
+        }
+      });
     }
     return json({ error: 'not found' }, 404);
   }
