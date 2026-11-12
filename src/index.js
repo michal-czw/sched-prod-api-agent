@@ -25,7 +25,7 @@ export default {
     if (request.method === 'GET' && url.pathname === '/incidents') {
       let incidents = await feed(env);
 
-      // --- since filter (additive read) ---
+      // --- since (additive read) ---
       const since = url.searchParams.get('since');
       if (since !== null) {
         const sinceDate = new Date(since);
