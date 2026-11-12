@@ -446,7 +446,7 @@ async function handleNew(issue, all) {
     }
     await comment(issue.n, `Build did not pass the live check; previous version restored. Will retry later. (${r.error})`);
     cooldown.set(issue.n, Date.now() + 180_000);
-    return ship(issue.n, 'waiting', false, `#${issue.n} agent`);
+    return;
   }
   if (d.action === 'ask') {
     const body = d.recordBody.trim();
@@ -500,8 +500,9 @@ async function tick() {
   const { text: shiplog } = await api('/shiplog');
   const todo = issues.slice().sort((a, b) => a.openedAt.localeCompare(b.openedAt));
   for (const i of todo) {
-    if (latestShip(shiplog, i.n) === null && !i.closed) {
-      try { await ship(i.n, 'waiting', false, 'none'); } catch (e) { log('pickup-error', String(e.message)); }
+    // Pick-up signal within the minute: a plain comment. No ship line yet, so the log never says more than the truth.
+    if (latestShip(shiplog, i.n) === null && !i.closed && !i.thread.some((t) => t.by === 'agent')) {
+      try { await comment(i.n, 'Picked up by the agent. Reading the request and the existing decisions now.'); i.thread.push({ by: 'agent', kind: 'comment', body: 'pickup', at: now }); } catch (e) { log('pickup-error', String(e.message)); }
     }
   }
   try { await repairRecords(issues, shiplog); } catch (e) { log('repair-error', String(e.message)); }
