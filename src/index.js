@@ -27,6 +27,13 @@ export default {
       if (status === 'open' || status === 'resolved') {
         incidents = incidents.filter(i => i.status === status);
       }
+      const since = url.searchParams.get('since');
+      if (since) {
+        const sinceDate = new Date(since);
+        if (!isNaN(sinceDate)) {
+          incidents = incidents.filter(i => new Date(i.openedAt) > sinceDate);
+        }
+      }
       return json({ incidents });
     }
 
