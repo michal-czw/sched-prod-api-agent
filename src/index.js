@@ -20,6 +20,19 @@ export default {
       const incident = incidents.find(i => i.id === id);
       if (!incident) return json({ error: 'not found' }, 404);
       return json({ incident });
+    } else if (request.method === 'POST' && url.pathname.startsWith('/incidents/')) {
+      const id = url.pathname.slice(10);
+      const incidents = await feed(env);
+      const incident = incidents.find(i => i.id === id);
+      if (!incident) return json({ error: 'not found' }, 404);
+      // Add suggestions only to incidents with a known cause
+      if (incident.cause) {
+        incident.suggestions = [
+          { text: 'Restart the service' },
+          { text: 'Check the logs' }
+        ];
+      }
+      return json({ incident });
     }
     return json({ error: 'not found' }, 404);
   }
