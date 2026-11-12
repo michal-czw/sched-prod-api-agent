@@ -50,28 +50,66 @@ function latestShip(text, n) {
 }
 
 // ---------- model ----------
-async function gemini(system, user) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
-  for (let i = 0; i < 8; i++) {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': E.GEMINI_API_KEY },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: system }] },
-        contents: [{ role: 'user', parts: [{ text: user }] }],
-        generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
-      }),
+let models = null;
+async function discoverModels() {
+  const list = [MODEL];
+  try {
+    const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', {
+      headers: { 'x-goog-api-key': E.GEMINI_API_KEY },
+      signal: AbortSignal.timeout(30_000),
     });
-    if (res.status === 429 || res.status >= 500) {
-      log('gemini-retry', { status: res.status, attempt: i });
-      await sleep(Math.min(60_000, 5_000 * 2 ** i));
+    const j = await r.json();
+    const names = (j.models || [])
+      .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent') && /flash/i.test(m.name) && !/image|tts|live|audio|lite|thinking|exp|preview/i.test(m.name))
+      .map((m) => m.name.replace('models/', ''))
+      .sort()
+      .reverse();
+    list.push(...names.filter((n) => n !== MODEL));
+  } catch (e) {
+    log('models-error', String(e.message));
+  }
+  log('models', list.slice(0, 6));
+  return list.slice(0, 5);
+}
+async function gemini(system, user) {
+  models ??= await discoverModels();
+  let mi = 0;
+  for (let i = 0; i < 14; i++) {
+    const model = models[mi % models.length];
+    let res;
+    try {
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': E.GEMINI_API_KEY },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: system }] },
+          contents: [{ role: 'user', parts: [{ text: user }] }],
+          generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
+        }),
+        signal: AbortSignal.timeout(90_000),
+      });
+    } catch (e) {
+      log('gemini-retry', { model, error: String(e.message), attempt: i });
+      mi++;
+      await sleep(3_000);
+      continue;
+    }
+    if (res.status === 429 || res.status >= 500 || res.status === 404) {
+      log('gemini-retry', { model, status: res.status, attempt: i });
+      mi++;
+      await sleep(res.status === 429 ? 15_000 : 3_000);
       continue;
     }
     const j = await res.json();
     const text = j.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') ?? '';
-    log('gemini', { status: res.status, prompt: user.slice(0, 300), reply: text.slice(0, 1500) });
+    log('gemini', { model, status: res.status, prompt: user.slice(0, 300), reply: text.slice(0, 1500) });
     if (!res.ok) throw new Error(`gemini ${res.status}: ${JSON.stringify(j).slice(0, 300)}`);
-    return JSON.parse(text.replace(/^```json\s*|```\s*$/g, ''));
+    try {
+      return JSON.parse(text.replace(/^```json\s*|```\s*$/g, ''));
+    } catch (e) {
+      log('gemini-badjson', { model });
+      mi++;
+    }
   }
   throw new Error('gemini: out of retries');
 }
