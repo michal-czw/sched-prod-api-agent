@@ -12,6 +12,7 @@ const MAX_MIN = Number(E.MAX_MINUTES || 100);
 const POLL_MS = 30_000;
 const started = Date.now();
 let LIVE = '';
+export const hooks = { deploy: null, llm: null, commit: null };
 
 mkdirSync('logs', { recursive: true });
 const LOG = 'logs/agent-log.jsonl';
@@ -146,6 +147,7 @@ async function geminiTry(system, user, json) {
   return null;
 }
 async function llm(system, user, json = true) {
+  if (hooks.llm) return hooks.llm(system, user, json);
   for (let round = 0; round < 2; round++) {
     const a = await cfTry(system, user, json);
     if (a) return a;
@@ -262,6 +264,7 @@ const writeFiles = (files) => Object.fromEntries(files.map((f) => { const old = 
 const restore = (saved) => Object.entries(saved).forEach(([p, c]) => writeFileSync(p, c));
 
 function deploy() {
+  if (hooks.deploy) { LIVE = hooks.deploy(); return LIVE; }
   const out = execFileSync('npx', ['wrangler', 'deploy', '--env', 'production', '--var', `FEED_URL:${E.FEED_URL || ''}`], {
     encoding: 'utf8', env: process.env, stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -270,6 +273,18 @@ function deploy() {
   if (m) LIVE = m[0];
   if (!LIVE) throw new Error('no workers.dev address in deploy output');
   return LIVE;
+}
+async function sampleIds() {
+  try {
+    const r = await fetch(`${LIVE}/incidents`, { signal: AbortSignal.timeout(15_000) });
+    const j = await r.json();
+    return (j.incidents || []).slice(0, 3).map((i) => i.id);
+  } catch { return []; }
+}
+// The contract's example id is not in the real feed: swap it for a real one before probing.
+function rewriteProbes(probes, ids) {
+  if (!ids.length) return probes || [];
+  return (probes || []).map((p) => ({ ...p, path: String(p.path || '').replace(/INC-1234/g, ids[0]) }));
 }
 const KEYS = ['id', 'service', 'summary', 'status', 'openedAt'];
 async function verifyLive({ incidents = true, allowExtraKeys = false, probes = [] } = {}) {
@@ -297,6 +312,7 @@ async function verifyLive({ incidents = true, allowExtraKeys = false, probes = [
   }
 }
 function commitPush(msg) {
+  if (hooks.commit) return hooks.commit(msg);
   try {
     execFileSync('git', ['add', '-A', 'src', 'contract']);
     if (!execFileSync('git', ['status', '--porcelain', 'src', 'contract'], { encoding: 'utf8' }).trim()) return;
@@ -309,12 +325,14 @@ function commitPush(msg) {
 // Ask the model for the code, deploy, probe the live address; on failure restore and retry with the error.
 async function buildAndShip(issue, instruction, { allowExtraKeys = false } = {}) {
   let feedback = '';
+  const ids = await sampleIds();
+  const idNote = ids.length ? `Real incident ids on the live feed right now: ${ids.join(', ')}. Probe with one of those, and probe an unknown id like INC-DOES-NOT-EXIST with status 404 when the issue says so. Never probe INC-1234 (it is only an example in the contract).\n\n` : '';
   for (let attempt = 0; attempt < 3; attempt++) {
     let b;
     try {
       const reply = await llm(
         SYSTEM,
-        `${await context()}\n\n## Issue\n${issueText(issue)}\n\n## Task\n${instruction}\n\n${feedback}Rules for the code: change only what the task needs; keep every existing route and the default export; a new route must be placed BEFORE any broader prefix match so it is not shadowed; never include restart advice; never read or print the environment or any token.\n\nReply in exactly this format and nothing else:\n=== META ===\n{"comment":"short markdown comment for the issue","risks":"other issue id + who reads it, or none","probes":[{"path":"/path-to-GET-on-the-live-address","status":200,"contains":"text the answer must contain"}]}\n=== FILE src/index.js ===\n<the complete new file>\n=== END ===\n(add a "=== FILE contract/api.md ===" block only when the contract must change)`,
+        `${await context()}\n\n## Issue\n${issueText(issue)}\n\n## Task\n${instruction}\n\n${idNote}${feedback}Rules for the code: change only what the task needs; keep every existing route and the default export; a new route must be placed BEFORE any broader prefix match so it is not shadowed; never include restart advice; never read or print the environment or any token.\n\nReply in exactly this format and nothing else:\n=== META ===\n{"comment":"short markdown comment for the issue","risks":"other issue id + who reads it, or none","probes":[{"path":"/path-to-GET-on-the-live-address","status":200,"contains":"text the answer must contain"}]}\n=== FILE src/index.js ===\n<the complete new file>\n=== END ===\n(add a "=== FILE contract/api.md ===" block only when the contract must change)`,
         false,
       );
       b = parseBuild(reply);
@@ -327,7 +345,7 @@ async function buildAndShip(issue, instruction, { allowExtraKeys = false } = {})
     const saved = writeFiles(b.files);
     try {
       deploy();
-      await verifyLive({ allowExtraKeys, probes: b.probes || [] });
+      await verifyLive({ allowExtraKeys, probes: rewriteProbes(b.probes, ids) });
       commitPush(`#${issue.n}: ship via agent`);
       return { ok: true, comment: b.comment, risks: b.risks };
     } catch (e) {
@@ -368,7 +386,8 @@ async function handleNew(issue, all) {
       await closeIssue(issue.n);
       return ship(issue.n, 'shipped', true, r.risks || d.risks);
     }
-    await comment(issue.n, `Build did not pass the live check; previous version restored. Will retry. (${r.error})`);
+    await comment(issue.n, `Build did not pass the live check; previous version restored. Will retry later. (${r.error})`);
+    cooldown.set(issue.n, Date.now() + 180_000);
     return ship(issue.n, 'waiting', false, `#${issue.n} agent`);
   }
   if (d.action === 'ask') {
@@ -407,7 +426,8 @@ async function handleAnswered(issue, ans) {
   }
   const r = await buildAndShip(issue, `The owner chose option ${num} in record ${rec.id}: "${opt.text}" (kind ${opt.kind}). Build exactly that and nothing more. Record:\n${body}`, { allowExtraKeys: true });
   if (!r.ok) {
-    await comment(issue.n, `Option ${num} did not pass the live check; previous version restored. Will retry. (${r.error})`);
+    await comment(issue.n, `Option ${num} did not pass the live check; previous version restored. Will retry later. (${r.error})`);
+    cooldown.set(issue.n, Date.now() + 180_000);
     return ship(issue.n, 'waiting', false, `#${issue.n} agent`);
   }
   await comment(issue.n, `${r.comment || 'Built.'}\n\nLive at ${LIVE}. Owner: please sign record ${rec.id} on your round page.`);
@@ -443,7 +463,7 @@ async function tick() {
       return { arrived: now >= lastIssueBy, done: false };
     } catch (e) {
       log('issue-error', { n: i.n, error: String(e.message) });
-      cooldown.set(i.n, Date.now() + 60_000);
+      cooldown.set(i.n, Date.now() + 120_000);
     }
   }
   const { text: sl2 } = await api('/shiplog');
@@ -473,4 +493,5 @@ async function main() {
   }
   log('exit', { minutes: Math.round((Date.now() - started) / 60000) });
 }
-main().catch((e) => { log('fatal', String(e.stack || e)); process.exit(1); });
+export { tick, verifyLive, rewriteProbes, cooldown };
+if (!E.AGENT_NO_MAIN) main().catch((e) => { log('fatal', String(e.stack || e)); process.exit(1); });
