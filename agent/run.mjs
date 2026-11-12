@@ -258,7 +258,11 @@ async function main() {
   await verifyLive(false);
   log('live', LIVE);
   writeFileSync('logs/live-url.txt', LIVE + '\n');
-  if (MODE === 'deploy') return console.log('LIVE ' + LIVE);
+  if (MODE === 'deploy') {
+    const g = await gemini('Reply with JSON only.', 'Return {"ok":true}');
+    log('gemini-ping', g);
+    return console.log('LIVE ' + LIVE);
+  }
   while ((Date.now() - started) / 60000 < MAX_MIN) {
     try {
       const s = await tick();
