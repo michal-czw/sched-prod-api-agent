@@ -13,51 +13,8 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (request.method === 'GET' && url.pathname === '/incidents') {
-      const status = url.searchParams.get('status');
-      const since = url.searchParams.get('since');
-      let incidents = await feed(env);
-      if (status) {
-        incidents = incidents.filter(incident => incident.status === status);
-      }
-      if (since) {
-        const sinceTime = new Date(since);
-        incidents = incidents.filter(incident => new Date(incident.openedAt) > sinceTime);
-      }
-      return json({ incidents });
-    } else if (request.method === 'GET' && url.pathname.startsWith('/incidents/')) {
-      const id = url.pathname.slice(10);
-      const incidents = await feed(env);
-      const incident = incidents.find(i => i.id === id);
-      if (!incident) return json({ error: 'not found' }, 404);
-      return json({ incident });
-    } else if (request.method === 'POST' && url.pathname.startsWith('/incidents/')) {
-      const id = url.pathname.slice(10);
-      const incidents = await feed(env);
-      const incident = incidents.find(i => i.id === id);
-      if (!incident) return json({ error: 'not found' }, 404);
-      // Add suggestions only to incidents with a known cause
-      if (incident.cause) {
-        incident.suggestions = [
-          { text: 'Restart the service' },
-          { text: 'Check the logs' }
-        ];
-      }
-      return json({ incident });
-    } else if (request.method === 'GET' && url.pathname === '/incidents/export.csv') {
-      const incidents = await feed(env);
-      const csv = incidents.map(incident => [
-        incident.id,
-        incident.service,
-        incident.summary,
-        incident.status,
-        incident.openedAt
-      ]).join('\n');
-      return new Response(csv, {
-        headers: {
-          'Content-Type': 'text/csv'
-        }
-      });
+      return json({ incidents: await feed(env) });
     }
     return json({ error: 'not found' }, 404);
-  }
+  },
 };

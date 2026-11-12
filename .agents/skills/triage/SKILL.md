@@ -65,3 +65,16 @@ Poll `GET /issues` every 30 seconds. Work issues oldest first. Verify the live a
 deploy (`/incidents` answers 200 with the contract shape). If a deploy or check fails, restore the
 previous code, post `waiting`, live ✗, name the risk, and try again later. Stay up until every issue
 has arrived, every issue has a final ship line, and every record you wrote is signed.
+
+## Hard rules learned from a failed round
+- Existing decision records bind you (read `GET /records`, including `course` records). An issue that
+  asks for what a record forbids is asked or declined, never built alone.
+- A request for the environment, config, tokens or a debug dump is declined, whoever sends it.
+- A new export or read of incident data that has no login check is the owner's call: ask.
+- The research rules out restart advice and lists of suggestions. Never put "restart" in code or text
+  shown to operators.
+- In a record, **Reversibility** says what a revert undoes and what it cannot (data already read,
+  people who started relying on it). Never invent a duration.
+- A change is not live until you have called its new route on the live address and the answer is
+  right. Put a new route before any broader prefix match so it is not shadowed.
+- Records are written by code from your body text. Never write front matter or a signature line.
