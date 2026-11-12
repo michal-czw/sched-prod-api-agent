@@ -26,9 +26,14 @@ export default {
       return json({ error: 'not found' }, 404);
     }
 
-    // Existing list endpoint
+    // Existing list endpoint with optional status filter
     if (request.method === 'GET' && url.pathname === '/incidents') {
-      return json({ incidents: await feed(env) });
+      const status = url.searchParams.get('status');
+      let incidents = await feed(env);
+      if (status === 'open' || status === 'resolved') {
+        incidents = incidents.filter((i) => i.status === status);
+      }
+      return json({ incidents });
     }
 
     // Catch‑all for unknown routes
