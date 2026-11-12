@@ -24,6 +24,17 @@ export default {
 
     if (request.method === 'GET' && url.pathname === '/incidents') {
       let incidents = await feed(env);
+
+      // --- since filter (additive read) ---
+      const since = url.searchParams.get('since');
+      if (since !== null) {
+        const sinceDate = new Date(since);
+        if (isNaN(sinceDate.getTime())) {
+          return json({ error: 'invalid since parameter' }, 400);
+        }
+        incidents = incidents.filter(i => new Date(i.openedAt) > sinceDate);
+      }
+      // --- existing status filter ---
       const status = url.searchParams.get('status');
       if (status) {
         // Filter by status; unknown status yields empty list
