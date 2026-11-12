@@ -74,7 +74,7 @@ async function discoverModels() {
 async function geminiTry(system, user) {
   models ??= await discoverModels();
   let mi = 0;
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 3; i++) {
     const model = models[mi % models.length];
     let res;
     try {
@@ -114,40 +114,46 @@ async function geminiTry(system, user) {
   return null;
 }
 
-const GH_MODELS = ['openai/gpt-4.1', 'openai/gpt-4.1-mini', 'openai/gpt-4o'];
-async function ghTry(system, user) {
-  if (!E.GITHUB_TOKEN) return null;
-  for (const model of GH_MODELS) {
+const CF_MODELS = ['@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/qwen/qwen2.5-coder-32b-instruct', '@cf/meta/llama-3.1-8b-instruct'];
+function parseLoose(text) {
+  const t = String(text).replace(/^```json\s*|```\s*$/g, '').trim();
+  try { return JSON.parse(t); } catch {}
+  const m = t.match(/\{[\s\S]*\}/);
+  if (m) return JSON.parse(m[0]);
+  throw new Error('no json');
+}
+async function cfTry(system, user) {
+  if (!E.CLOUDFLARE_API_TOKEN || !E.CLOUDFLARE_ACCOUNT_ID) return null;
+  for (const model of CF_MODELS) {
     for (let i = 0; i < 2; i++) {
       try {
-        const res = await fetch('https://models.github.ai/inference/chat/completions', {
+        const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${E.CLOUDFLARE_ACCOUNT_ID}/ai/run/${model}`, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${E.GITHUB_TOKEN}`, 'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28', Accept: 'application/vnd.github+json' },
-          body: JSON.stringify({ model, temperature: 0.2, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
+          headers: { Authorization: `Bearer ${E.CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ max_tokens: 6000, temperature: 0.2, messages: [{ role: 'system', content: system + '\nReply with one JSON object only, no prose.' }, { role: 'user', content: user }] }),
           signal: AbortSignal.timeout(120_000),
         });
         const raw = await res.text();
         let j = {};
         try { j = JSON.parse(raw); } catch {}
-        const text = j.choices?.[0]?.message?.content ?? '';
-        if (!text) log('ghmodels-raw', { model, status: res.status, raw: raw.slice(0, 500) });
-        log('ghmodels', { model, status: res.status, prompt: user.slice(0, 300), reply: text.slice(0, 1500) });
-        if (res.ok && text) return JSON.parse(text.replace(/^```json\s*|```\s*$/g, ''));
-        if (res.status === 429) await sleep(20_000); else break;
+        const r = j.result?.response;
+        log('cfai', { model, status: res.status, prompt: user.slice(0, 300), reply: (typeof r === 'string' ? r : JSON.stringify(r ?? raw)).slice(0, 1500) });
+        if (res.ok && r != null) return typeof r === 'object' ? r : parseLoose(r);
+        if (res.status === 429) await sleep(15_000); else break;
       } catch (e) {
-        log('ghmodels-error', { model, error: String(e.message) });
+        log('cfai-error', { model, error: String(e.message) });
       }
     }
   }
   return null;
 }
 
-// Gemini first, GitHub Models as the fallback, repeated until one answers.
+// Gemini first, Cloudflare Workers AI as the fallback, repeated until one answers.
 async function gemini(system, user) {
   for (let round = 0; round < 6; round++) {
     const a = await geminiTry(system, user);
     if (a) return a;
-    const b = await ghTry(system, user);
+    const b = await cfTry(system, user);
     if (b) return b;
     log('llm-round-failed', { round });
     await sleep(15_000);
@@ -342,8 +348,8 @@ async function main() {
   log('live', LIVE);
   writeFileSync('logs/live-url.txt', LIVE + '\n');
   if (MODE === 'deploy') {
-    const gh = await ghTry('Reply with JSON only.', 'Return {"ok":true}');
-    log('gh-ping', gh);
+    const gh = await cfTry('Reply with JSON only.', 'Return {"ok":true}');
+    log('cf-ping', gh);
     const g = await gemini('Reply with JSON only.', 'Return {"ok":true}');
     log('gemini-ping', g);
     return console.log('LIVE ' + LIVE);
