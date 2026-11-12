@@ -14,7 +14,13 @@ export default {
     const url = new URL(request.url);
     if (request.method === 'GET' && url.pathname === '/incidents') {
       return json({ incidents: await feed(env) });
+    } else if (request.method === 'GET' && url.pathname.startsWith('/incidents/')) {
+      const id = url.pathname.slice(10);
+      const incidents = await feed(env);
+      const incident = incidents.find(i => i.id === id);
+      if (!incident) return json({ error: 'not found' }, 404);
+      return json({ incident });
     }
     return json({ error: 'not found' }, 404);
-  },
+  }
 };
