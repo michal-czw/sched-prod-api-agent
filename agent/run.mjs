@@ -86,7 +86,7 @@ async function geminiTry(system, user) {
           contents: [{ role: 'user', parts: [{ text: user }] }],
           generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
         }),
-        signal: AbortSignal.timeout(90_000),
+        signal: AbortSignal.timeout(45_000),
       });
     } catch (e) {
       log('gemini-retry', { model, error: String(e.message), attempt: i });
@@ -126,9 +126,12 @@ async function ghTry(system, user) {
           body: JSON.stringify({ model, temperature: 0.2, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
           signal: AbortSignal.timeout(120_000),
         });
-        const j = await res.json().catch(() => ({}));
+        const raw = await res.text();
+        let j = {};
+        try { j = JSON.parse(raw); } catch {}
         const text = j.choices?.[0]?.message?.content ?? '';
-        log('ghmodels', { model, status: res.status, prompt: user.slice(0, 300), reply: text.slice(0, 1500) || JSON.stringify(j).slice(0, 300) });
+        if (!text) log('ghmodels-raw', { model, status: res.status, raw: raw.slice(0, 500) });
+        log('ghmodels', { model, status: res.status, prompt: user.slice(0, 300), reply: text.slice(0, 1500) });
         if (res.ok && text) return JSON.parse(text.replace(/^```json\s*|```\s*$/g, ''));
         if (res.status === 429) await sleep(20_000); else break;
       } catch (e) {
@@ -250,7 +253,6 @@ async function decide(issue, all) {
 }
 
 async function handleNew(issue, all) {
-  await ship(issue.n, 'waiting', false, 'none'); // pick-up signal within the minute
   const d = await decide(issue, all);
   if (d.action === 'build') {
     const r = await applyBuild(issue.n, d.files);
@@ -306,6 +308,11 @@ async function tick() {
   const { text: shiplog } = await api('/shiplog');
   const todo = issues.slice().sort((a, b) => a.openedAt.localeCompare(b.openedAt));
   for (const i of todo) {
+    if (latestShip(shiplog, i.n) === null && !i.closed) {
+      try { await ship(i.n, 'waiting', false, 'none'); } catch (e) { log('pickup-error', String(e.message)); }
+    }
+  }
+  for (const i of todo) {
     const verb = latestShip(shiplog, i.n);
     if (['shipped', 'declined', 'closed'].includes(verb)) continue;
     if (i.closed && verb === null) { await ship(i.n, 'closed', false, 'none'); continue; }
@@ -335,6 +342,8 @@ async function main() {
   log('live', LIVE);
   writeFileSync('logs/live-url.txt', LIVE + '\n');
   if (MODE === 'deploy') {
+    const gh = await ghTry('Reply with JSON only.', 'Return {"ok":true}');
+    log('gh-ping', gh);
     const g = await gemini('Reply with JSON only.', 'Return {"ok":true}');
     log('gemini-ping', g);
     return console.log('LIVE ' + LIVE);
