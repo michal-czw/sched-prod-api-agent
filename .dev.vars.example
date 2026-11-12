@@ -1,0 +1,4 @@
+# Copy to .dev.vars for `npm run dev`. Never commit .dev.vars.
+FEED_URL=
+# Production admin token for the incident feed (ops only).
+PROD_ADMIN_TOKEN=<ops only - never used by this API or the agent>

@@ -1,0 +1,50 @@
+name: agent
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'run (work the round) or deploy (deploy + smoke test only)'
+        default: run
+      tracker_url:
+        description: 'Course tracker address (from the round open)'
+        default: ''
+      feed_url:
+        description: 'Production feed URL (from the round open)'
+        default: 'https://example.invalid/incidents'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: |
+          git config user.name "sched-prod agent"
+          git config user.email "agent@users.noreply.github.com"
+      - name: Agent
+        env:
+          MODE: ${{ inputs.mode }}
+          TRACKER_URL: ${{ inputs.tracker_url }}
+          TRACKER_TOKEN: ${{ secrets.TRACKER_TOKEN }}
+          FEED_URL: ${{ inputs.feed_url }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node agent/run.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-log
+          path: logs/
+          retention-days: 7

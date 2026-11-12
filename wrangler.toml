@@ -1,0 +1,11 @@
+name = "sched-prod-api"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+# Where production incidents come from: the feed URL the round hands you.
+FEED_URL = ""
+
+# Production: what `npm run deploy` ships.
+[env.production]
+workers_dev = true
