@@ -1,5 +1,3 @@
-// sched-prod API: the incidents the status page and the board read. Contract: contract/api.md.
-
 const json = (body, status = 200) => Response.json(body, { status });
 
 async function feed(env) {
@@ -24,7 +22,12 @@ export default {
 
     // Existing endpoint: list all incidents (newest first per contract)
     if (request.method === 'GET' && url.pathname === '/incidents') {
-      return json({ incidents: await feed(env) });
+      let incidents = await feed(env);
+      const status = url.searchParams.get('status');
+      if (status === 'open' || status === 'resolved') {
+        incidents = incidents.filter(i => i.status === status);
+      }
+      return json({ incidents });
     }
 
     // Fallback for any other route
