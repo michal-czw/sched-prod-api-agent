@@ -25,14 +25,29 @@ export default {
         return json({ error: 'not found' }, 404);
       }
     }
+
     if (request.method === 'GET' && url.pathname === '/incidents') {
       let incidents = await feed(env);
+
+      // Optional status filter
       const status = url.searchParams.get('status');
       if (status) {
         incidents = incidents.filter(i => i.status === status);
       }
+
+      // Optional since filter (additive read)
+      const since = url.searchParams.get('since');
+      if (since) {
+        const sinceDate = new Date(since);
+        if (!isNaN(sinceDate)) {
+          incidents = incidents.filter(i => new Date(i.openedAt) > sinceDate);
+        }
+        // If since is invalid, ignore the filter (return all incidents)
+      }
+
       return json({ incidents });
     }
+
     return json({ error: 'not found' }, 404);
   },
 };
