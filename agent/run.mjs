@@ -429,16 +429,37 @@ async function decide(issue, all, feedback = '') {
   );
 }
 
+// A decline or close may rest only on a SIGNED record. An unsigned record is not a decision: the owner must be asked.
+async function unsignedCitation(d) {
+  const { records } = await api('/records');
+  const txt = `${d.comment || ''} ${d.reason || ''}`.replace(/[\u2010-\u2015]/g, '-');
+  const nums = [...txt.matchAll(/\b(0\d{3})\b/g)].map((m) => m[1]);
+  const cited = records.filter((r) => nums.includes(String(r.id).slice(0, 4)));
+  const unsigned = cited.filter((r) => !r.signedBy);
+  return unsigned.length && !cited.some((r) => r.signedBy) ? unsigned.map((r) => r.id) : null;
+}
+const SECRET_ASK = /\b(env|environment|token|secret|credential|debug|password|api key)\b/i;
 async function handleNew(issue, all) {
-  let d;
+  let d = null;
   let feedback = '';
-  for (let k = 0; k < 2; k++) {
+  for (let k = 0; k < 3; k++) {
     d = await decide(issue, all, feedback);
-    if (d.action !== 'ask') break;
-    const errs = validateBody(String(d.recordBody || ''));
-    if (!errs.length) break;
-    feedback = `Your last recordBody was rejected: ${errs.join('; ')}. Fix that.\n\n`;
-    d = null;
+    if (d.action === 'ask') {
+      const errs = validateBody(String(d.recordBody || ''));
+      if (!errs.length) break;
+      feedback = `Your last recordBody was rejected: ${errs.join('; ')}. Fix that.\n\n`;
+      d = null;
+      continue;
+    }
+    if ((d.action === 'decline' || d.action === 'close') && !SECRET_ASK.test(`${issue.title} ${issue.body}`)) {
+      const bad = await unsignedCitation(d);
+      if (bad) {
+        feedback = `Rejected: you settled this issue on ${bad.join(', ')}, which carries no signature. An unsigned record is not a decision. Ask the owner (action "ask") with one decline, one smaller and one full option, and write the recordBody.\n\n`;
+        d = null;
+        continue;
+      }
+    }
+    break;
   }
   if (!d) throw new Error('could not get a valid record body');
   if (d.action === 'build') {

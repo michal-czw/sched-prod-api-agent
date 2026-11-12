@@ -81,3 +81,6 @@ has arrived, every issue has a final ship line, and every record you wrote is si
 - Every record offers exactly one option of each kind: `decline` (build nothing), `smaller` (a reduced,
   read-only part of the ask) and `full` (all of it). Its Reopen threshold names concrete evidence: a
   number, a written source or a signed document.
+- Only a SIGNED record (a `signedBy` on `GET /records`) is a decision. A record with no signature, such
+  as an unsigned course note, binds nothing: when it is the only thing in the way, ask the owner. Decline
+  alone only when a signed record, the contract, or a rule against secrets forbids the request.
