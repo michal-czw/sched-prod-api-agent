@@ -14,12 +14,16 @@ export default {
     const url = new URL(request.url);
     if (request.method === 'GET' && url.pathname === '/incidents') {
       const status = url.searchParams.get('status');
-      const incidents = await feed(env);
+      const since = url.searchParams.get('since');
+      let incidents = await feed(env);
       if (status) {
-        return json({ incidents: incidents.filter(incident => incident.status === status) });
-      } else {
-        return json({ incidents });
+        incidents = incidents.filter(incident => incident.status === status);
       }
+      if (since) {
+        const sinceTime = new Date(since);
+        incidents = incidents.filter(incident => new Date(incident.openedAt) > sinceTime);
+      }
+      return json({ incidents });
     } else if (request.method === 'GET' && url.pathname.startsWith('/incidents/')) {
       const id = url.pathname.slice(10);
       const incidents = await feed(env);
