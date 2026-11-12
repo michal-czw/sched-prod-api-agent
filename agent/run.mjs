@@ -20,7 +20,8 @@ const mask = (s) =>
   String(s)
     .split(TOKEN || '\u0000').join('***')
     .split(E.GEMINI_API_KEY || '\u0000').join('***')
-    .split(E.CLOUDFLARE_API_TOKEN || '\u0000').join('***');
+    .split(E.CLOUDFLARE_API_TOKEN || '\u0000').join('***')
+    .split(E.GROQ_API_KEY || '\u0000').join('***');
 const log = (kind, data) => {
   const line = mask(JSON.stringify({ t: new Date().toISOString(), kind, data }));
   appendFileSync(LOG, line + '\n');
@@ -57,7 +58,7 @@ function latestShip(text, n) {
   return last ? last.split('·')[1]?.trim() || null : null;
 }
 
-// ---------- model: Workers AI first (steady), Gemini second ----------
+// ---------- model: Groq first, Gemini second, Workers AI third ----------
 let gModels = null;
 async function discoverGemini() {
   const list = [];
@@ -146,13 +147,70 @@ async function geminiTry(system, user, json) {
   }
   return null;
 }
+let groqModels = null;
+async function discoverGroq() {
+  try {
+    const r = await fetch('https://api.groq.com/openai/v1/models', { headers: { Authorization: `Bearer ${E.GROQ_API_KEY}` }, signal: AbortSignal.timeout(20_000) });
+    const j = await r.json();
+    const ids = (j.data || []).filter((m) => m.active !== false).map((m) => m.id).filter((id) => !/whisper|guard|tts|embed|orpheus|compound|safeguard/i.test(id));
+    const score = (id) => (/llama-3\.3-70b/i.test(id) ? 100 : /70b|120b|large|maverick|qwen3-32b|kimi/i.test(id) ? 50 : 0);
+    const out = ids.sort((a, b) => score(b) - score(a)).slice(0, 3);
+    log('groq-models', out);
+    return out;
+  } catch (e) {
+    log('groq-models-error', String(e.message));
+    return [];
+  }
+}
+async function groqTry(system, user, json) {
+  if (!E.GROQ_API_KEY) return null;
+  groqModels ??= await discoverGroq();
+  for (const model of groqModels) {
+    for (let i = 0; i < 2; i++) {
+      try {
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${E.GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            temperature: 0.2,
+            max_tokens: 6000,
+            ...(json ? { response_format: { type: 'json_object' } } : {}),
+            messages: [
+              { role: 'system', content: system + (json ? '\nReply with one JSON object only.' : '') },
+              { role: 'user', content: user },
+            ],
+          }),
+          signal: AbortSignal.timeout(60_000),
+        });
+        const raw = await res.text();
+        let j = {};
+        try { j = JSON.parse(raw); } catch {}
+        const text = j.choices?.[0]?.message?.content ?? '';
+        log('groq', { model, status: res.status, prompt: user.slice(0, 200), reply: (text || raw).slice(0, 1200) });
+        if (res.ok && text) {
+          if (!json) return text;
+          try { return parseLoose(text); } catch { log('groq-badjson', { model }); break; }
+        }
+        if (res.status === 429) { await sleep(Math.min(20_000, Number(res.headers.get('retry-after') || 8) * 1000)); continue; }
+        break;
+      } catch (e) {
+        log('groq-error', { model, error: String(e.message) });
+        break;
+      }
+    }
+  }
+  return null;
+}
 async function llm(system, user, json = true) {
   if (hooks.llm) return hooks.llm(system, user, json);
   for (let round = 0; round < 2; round++) {
-    const a = await cfTry(system, user, json);
-    if (a) return a;
+    const g = await groqTry(system, user, json);
+    if (g) return g;
     const b = await geminiTry(system, user, json);
     if (b) return b;
+    const a = await cfTry(system, user, json);
+    if (a) return a;
     log('llm-round-failed', { round });
     await sleep(5_000);
   }
