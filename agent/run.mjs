@@ -71,10 +71,10 @@ async function discoverModels() {
   log('models', list.slice(0, 6));
   return list.slice(0, 5);
 }
-async function gemini(system, user) {
+async function geminiTry(system, user) {
   models ??= await discoverModels();
   let mi = 0;
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i < 5; i++) {
     const model = models[mi % models.length];
     let res;
     try {
@@ -103,7 +103,7 @@ async function gemini(system, user) {
     const j = await res.json();
     const text = j.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') ?? '';
     log('gemini', { model, status: res.status, prompt: user.slice(0, 300), reply: text.slice(0, 1500) });
-    if (!res.ok) throw new Error(`gemini ${res.status}: ${JSON.stringify(j).slice(0, 300)}`);
+    if (!res.ok) { log('gemini-refused', { model, status: res.status, reply: JSON.stringify(j).slice(0, 300) }); return null; }
     try {
       return JSON.parse(text.replace(/^```json\s*|```\s*$/g, ''));
     } catch (e) {
@@ -111,7 +111,45 @@ async function gemini(system, user) {
       mi++;
     }
   }
-  throw new Error('gemini: out of retries');
+  return null;
+}
+
+const GH_MODELS = ['openai/gpt-4.1', 'openai/gpt-4.1-mini', 'openai/gpt-4o'];
+async function ghTry(system, user) {
+  if (!E.GITHUB_TOKEN) return null;
+  for (const model of GH_MODELS) {
+    for (let i = 0; i < 2; i++) {
+      try {
+        const res = await fetch('https://models.github.ai/inference/chat/completions', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${E.GITHUB_TOKEN}`, 'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28', Accept: 'application/vnd.github+json' },
+          body: JSON.stringify({ model, temperature: 0.2, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
+          signal: AbortSignal.timeout(120_000),
+        });
+        const j = await res.json().catch(() => ({}));
+        const text = j.choices?.[0]?.message?.content ?? '';
+        log('ghmodels', { model, status: res.status, prompt: user.slice(0, 300), reply: text.slice(0, 1500) || JSON.stringify(j).slice(0, 300) });
+        if (res.ok && text) return JSON.parse(text.replace(/^```json\s*|```\s*$/g, ''));
+        if (res.status === 429) await sleep(20_000); else break;
+      } catch (e) {
+        log('ghmodels-error', { model, error: String(e.message) });
+      }
+    }
+  }
+  return null;
+}
+
+// Gemini first, GitHub Models as the fallback, repeated until one answers.
+async function gemini(system, user) {
+  for (let round = 0; round < 6; round++) {
+    const a = await geminiTry(system, user);
+    if (a) return a;
+    const b = await ghTry(system, user);
+    if (b) return b;
+    log('llm-round-failed', { round });
+    await sleep(15_000);
+  }
+  throw new Error('no model answered');
 }
 
 const SKILL = read('.agents/skills/triage/SKILL.md');
