@@ -26,7 +26,12 @@ export default {
       }
     }
     if (request.method === 'GET' && url.pathname === '/incidents') {
-      return json({ incidents: await feed(env) });
+      let incidents = await feed(env);
+      const status = url.searchParams.get('status');
+      if (status) {
+        incidents = incidents.filter(i => i.status === status);
+      }
+      return json({ incidents });
     }
     return json({ error: 'not found' }, 404);
   },
