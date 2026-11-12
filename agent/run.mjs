@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 const E = process.env;
 const TRACKER = (E.TRACKER_URL || '').replace(/\/$/, '');
 const TOKEN = E.TRACKER_TOKEN || '';
-const MODEL = E.GEMINI_MODEL || 'gemini-2.5-flash';
+const MODEL = E.GEMINI_MODEL || 'gemini-3.8-flash';
 const MODE = E.MODE || 'run'; // 'deploy' = deploy and smoke test only
 const MAX_MIN = Number(E.MAX_MINUTES || 100);
 const POLL_MS = 30_000;
