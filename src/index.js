@@ -1,5 +1,3 @@
-// sched-prod API: the incidents the status page and the board read. Contract: contract/api.md.
-
 const json = (body, status = 200) => Response.json(body, { status });
 
 async function feed(env) {
@@ -12,6 +10,18 @@ async function feed(env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    // New endpoint: GET /incidents/{id}
+    if (request.method === 'GET' && /^\/incidents\/[^\/]+$/.test(url.pathname)) {
+      const id = url.pathname.split('/')[2];
+      const incidents = await feed(env);
+      const incident = incidents.find(i => i.id === id);
+      if (incident) {
+        return json({ incident });
+      }
+      return json({ error: 'not found' }, 404);
+    }
+
     if (request.method === 'GET' && url.pathname === '/incidents') {
       return json({ incidents: await feed(env) });
     }
