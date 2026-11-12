@@ -1,5 +1,3 @@
-// sched-prod API: the incidents the status page and the board read. Contract: contract/api.md.
-
 const json = (body, status = 200) => Response.json(body, { status });
 
 async function feed(env) {
@@ -26,12 +24,19 @@ export default {
       return json({ error: 'not found' }, 404);
     }
 
-    // Existing list endpoint with optional status filter
+    // Existing list endpoint with optional status filter and since filter
     if (request.method === 'GET' && url.pathname === '/incidents') {
       const status = url.searchParams.get('status');
+      const since = url.searchParams.get('since');
       let incidents = await feed(env);
       if (status === 'open' || status === 'resolved') {
         incidents = incidents.filter((i) => i.status === status);
+      }
+      if (since) {
+        const sinceDate = new Date(since);
+        if (!isNaN(sinceDate.getTime())) {
+          incidents = incidents.filter((i) => new Date(i.openedAt) > sinceDate);
+        }
       }
       return json({ incidents });
     }
