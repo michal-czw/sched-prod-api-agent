@@ -259,6 +259,7 @@ function parseOptions(body) {
     .filter(Boolean)
     .map((m) => ({ n: Number(m[1]), text: m[2].trim(), kind: (m[2].match(/kind:\s*(decline|smaller|full)/i) || [])[1]?.toLowerCase() }));
 }
+const opts_decline = (body) => (parseOptions(body).find((o) => o.kind === 'decline') || { n: 1 }).n;
 function validateBody(body) {
   const errs = [];
   const opts = parseOptions(body);
@@ -509,8 +510,15 @@ async function handleAnswered(issue, ans) {
   }
   const r = await buildAndShip(issue, `The owner chose option ${num} in record ${rec.id}: "${opt.text}" (kind ${opt.kind}). Build exactly that and nothing more. Record:\n${body}`, { allowExtraKeys: true });
   if (!r.ok) {
-    await comment(issue.n, `Option ${num} did not pass the live check; previous version restored. Will retry later. (${r.error})`);
+    const n = (fails.get(issue.n) || 0) + 1;
+    fails.set(issue.n, n);
     cooldown.set(issue.n, Date.now() + 180_000);
+    if (n >= 2) {
+      fails.set(issue.n, 0);
+      await comment(issue.n, `I could not build option ${num} safely after ${n} tries, and the previous version is live. Reason: ${r.error.replace(/\s+/g, ' ').slice(0, 220)} Owner: please choose again with \`/answer <n>\`. Option ${opts_decline(body)} builds nothing.`);
+      return ship(issue.n, 'asked', false, `#${issue.n} owner`);
+    }
+    await comment(issue.n, `Option ${num} did not pass the live check; previous version restored. Will retry later. (${r.error})`);
     return ship(issue.n, 'waiting', false, `#${issue.n} agent`);
   }
   await comment(issue.n, `${r.comment || 'Built.'}\n\nLive at ${LIVE}. Owner: please sign record ${rec.id} on your round page.`);
@@ -520,6 +528,7 @@ async function handleAnswered(issue, ans) {
 
 // ---------- loop ----------
 const cooldown = new Map();
+const fails = new Map();
 async function tick() {
   const { issues, now, lastIssueBy } = await api('/issues');
   const { text: shiplog } = await api('/shiplog');
@@ -540,6 +549,8 @@ async function tick() {
       const ans = i.thread.filter((t) => t.by === 'owner' && t.kind === 'comment' && /\/answer\s+\d+/.test(t.body || '')).pop();
       if (verb === 'asked' || i.labels.includes('needs-human')) {
         if (!ans) continue;
+        const blocked = i.thread.filter((t) => t.by === 'agent' && t.kind === 'comment' && /I could not build option/.test(t.body || '')).pop();
+        if (blocked && ans.at <= blocked.at) continue; // waiting for a newer answer
         await handleAnswered(i, ans);
       } else {
         await handleNew(i, issues);
