@@ -264,7 +264,11 @@ function validateBody(body) {
   const opts = parseOptions(body);
   if (opts.length < 2) errs.push('need at least 2 numbered options');
   if (opts.some((o) => !o.kind)) errs.push('every option needs "— kind: decline|smaller|full"');
-  if (!opts.some((o) => o.kind === 'decline')) errs.push('include a decline option');
+  for (const k of ['decline', 'smaller', 'full'])
+    if (!opts.some((o) => o.kind === k)) errs.push(`include an option of kind ${k} (one of each: decline, smaller, full)`);
+  const reopen = (body.match(/## Reopen threshold([\s\S]*?)(\n## |$)/i) || [])[1] || '';
+  if (reopen.trim().length < 40 || !/(\d|in writing|written|signed|incident report|contract|legal)/i.test(reopen))
+    errs.push('Reopen threshold must name concrete evidence: a number, a written source, or a signed document');
   for (const h of ['## Ask', '## Options', '## Cost of being wrong', '## Reversibility', '## Success metric', '## Reopen threshold'])
     if (!body.includes(h)) errs.push(`missing section ${h}`);
   if (!/Recommendation:/i.test(body)) errs.push('missing "Recommendation:" line');
@@ -421,7 +425,7 @@ async function decide(issue, all, feedback = '') {
   const others = all.filter((x) => x.n !== issue.n).map((x) => `#${x.n} ${x.title} (${x.closed ? 'closed' : x.labels.join(',') || 'open'})`).join('\n');
   return llm(
     SYSTEM,
-    `${await context()}\n\n## Other issues\n${others}\n\n## This issue\n${issueText(issue)}\n\n${feedback}Decide with the skill. Existing records bind you: an issue that asks for what a record forbids is declined or asked, never built alone.\nReturn JSON:\n{"action":"build|ask|decline|close","reason":"one line","comment":"markdown comment for the issue: for decline/close what decided it, with ids; for build what you will add","risks":"other issue id + who reads it, or none","buildTask":"for build only: precise instruction for the code change","recordBody":"for ask only: markdown from '## Ask' to '## Reopen threshold' using the template headings; options numbered '1. ... — kind: decline|smaller|full' with at least a decline option; a 'Recommendation: <n>, because ...' line; in '## Reversibility' say honestly what a revert undoes and what it cannot (data already read, people who started relying on it) and do not invent durations; no front matter, no Decision section"}`,
+    `${await context()}\n\n## Other issues\n${others}\n\n## This issue\n${issueText(issue)}\n\n${feedback}Decide with the skill. Existing records bind you: an issue that asks for what a record forbids is declined or asked, never built alone.\nReturn JSON:\n{"action":"build|ask|decline|close","reason":"one line","comment":"markdown comment for the issue: for decline/close what decided it, with ids; for build what you will add","risks":"other issue id + who reads it, or none","buildTask":"for build only: precise instruction for the code change","recordBody":"for ask only: markdown from '## Ask' to '## Reopen threshold' using the template headings; options numbered '1. ... — kind: decline|smaller|full' with EXACTLY one option of each kind (decline = build nothing, smaller = a read-only or reduced part of the ask, full = all of it); a 'Recommendation: <n>, because ...' line; in '## Reversibility' say honestly what a revert undoes and what it cannot (data already read, people who started relying on it) and do not invent durations; '## Reopen threshold' names concrete evidence that would reopen it (a number, a written source or a signed document, not 'if new research shows'); no front matter, no Decision section"}`,
   );
 }
 

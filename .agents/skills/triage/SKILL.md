@@ -78,3 +78,6 @@ has arrived, every issue has a final ship line, and every record you wrote is si
 - A change is not live until you have called its new route on the live address and the answer is
   right. Put a new route before any broader prefix match so it is not shadowed.
 - Records are written by code from your body text. Never write front matter or a signature line.
+- Every record offers exactly one option of each kind: `decline` (build nothing), `smaller` (a reduced,
+  read-only part of the ask) and `full` (all of it). Its Reopen threshold names concrete evidence: a
+  number, a written source or a signed document.
